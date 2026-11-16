@@ -1,18 +1,17 @@
+// Cart state — single source of truth.
+// Items live here and are persisted once under the "bakong-cart-store"
+// localStorage key (via zustand persist). The old double-storage setup
+// ("local-cart" + a manual syncCart copy) has been removed; existing carts
+// in "local-cart" are migrated automatically on first load.
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import {
-  type ShopifyProduct,
-  CART_QUERY,
-  createShopifyCart,
-  addLineToShopifyCart,
-  updateShopifyCartLine,
-  removeLineFromShopifyCart,
-  storefrontApiRequest,
-} from "@/lib/shopify";
+import type { ProductEdge } from "@/lib/productStore";
+
+export const CHECKOUT_URL = "/checkout/bakong";
 
 export interface CartItem {
-  lineId: string | null;
-  product: ShopifyProduct;
+  lineId: string;
+  product: ProductEdge;
   variantId: string;
   variantTitle: string;
   price: { amount: string; currencyCode: string };
@@ -22,149 +21,88 @@ export interface CartItem {
 
 interface CartStore {
   items: CartItem[];
-  cartId: string | null;
-  checkoutUrl: string | null;
   isLoading: boolean;
   isSyncing: boolean;
-  addItem: (item: Omit<CartItem, "lineId">) => Promise<void>;
-  updateQuantity: (variantId: string, quantity: number) => Promise<void>;
-  removeItem: (variantId: string) => Promise<void>;
+  addItem: (item: Omit<CartItem, "lineId">) => void;
+  updateQuantity: (variantId: string, quantity: number) => void;
+  removeItem: (variantId: string) => void;
   clearCart: () => void;
+  /** Kept for API compatibility — hydration + migration happen via persist. */
   syncCart: () => Promise<void>;
   getCheckoutUrl: () => string | null;
+}
+
+function newLineId(): string {
+  return `line-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/** One-time rescue of carts saved by the old double-storage implementation. */
+function readLegacyCart(): CartItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem("local-cart");
+    if (!raw) return [];
+    const cart = JSON.parse(raw) as { items?: CartItem[] };
+    return Array.isArray(cart.items) ? cart.items : [];
+  } catch {
+    return [];
+  }
 }
 
 export const useCartStore = create<CartStore>()(
   persist(
     (set, get) => ({
       items: [],
-      cartId: null,
-      checkoutUrl: null,
       isLoading: false,
       isSyncing: false,
 
-      addItem: async (item) => {
-        const { items, cartId, clearCart } = get();
-        const existingItem = items.find((i) => i.variantId === item.variantId);
-        set({ isLoading: true });
-        try {
-          if (!cartId) {
-            const result = await createShopifyCart({ variantId: item.variantId, quantity: item.quantity });
-            if (result) {
-              set({
-                cartId: result.cartId,
-                checkoutUrl: result.checkoutUrl,
-                items: [{ ...item, lineId: result.lineId }],
-              });
-            }
-          } else if (existingItem) {
-            const newQuantity = existingItem.quantity + item.quantity;
-            if (!existingItem.lineId) return;
-            const result = await updateShopifyCartLine(cartId, existingItem.lineId, newQuantity);
-            if (result.success) {
-              const currentItems = get().items;
-              set({
-                items: currentItems.map((i) =>
-                  i.variantId === item.variantId ? { ...i, quantity: newQuantity } : i,
-                ),
-              });
-            } else if (result.cartNotFound) {
-              clearCart();
-            }
-          } else {
-            const result = await addLineToShopifyCart(cartId, {
-              variantId: item.variantId,
-              quantity: item.quantity,
-            });
-            if (result.success) {
-              const currentItems = get().items;
-              set({ items: [...currentItems, { ...item, lineId: result.lineId ?? null }] });
-            } else if (result.cartNotFound) {
-              clearCart();
-            }
+      addItem: (item) =>
+        set((state) => {
+          const existing = state.items.find((i) => i.variantId === item.variantId);
+          if (existing) {
+            return {
+              items: state.items.map((i) =>
+                i.variantId === item.variantId ? { ...i, quantity: i.quantity + item.quantity } : i,
+              ),
+            };
           }
-        } catch (error) {
-          console.error("Failed to add item:", error);
-        } finally {
-          set({ isLoading: false });
-        }
-      },
+          return { items: [...state.items, { ...item, lineId: newLineId() }] };
+        }),
 
-      updateQuantity: async (variantId, quantity) => {
-        if (quantity <= 0) {
-          await get().removeItem(variantId);
-          return;
-        }
-        const { items, cartId, clearCart } = get();
-        const item = items.find((i) => i.variantId === variantId);
-        if (!item?.lineId || !cartId) return;
-        set({ isLoading: true });
-        try {
-          const result = await updateShopifyCartLine(cartId, item.lineId, quantity);
-          if (result.success) {
-            const currentItems = get().items;
-            set({
-              items: currentItems.map((i) => (i.variantId === variantId ? { ...i, quantity } : i)),
-            });
-          } else if (result.cartNotFound) {
-            clearCart();
-          }
-        } catch (error) {
-          console.error("Failed to update quantity:", error);
-        } finally {
-          set({ isLoading: false });
-        }
-      },
+      updateQuantity: (variantId, quantity) =>
+        set((state) => ({
+          items:
+            quantity <= 0
+              ? state.items.filter((i) => i.variantId !== variantId)
+              : state.items.map((i) => (i.variantId === variantId ? { ...i, quantity } : i)),
+        })),
 
-      removeItem: async (variantId) => {
-        const { items, cartId, clearCart } = get();
-        const item = items.find((i) => i.variantId === variantId);
-        if (!item?.lineId || !cartId) return;
-        set({ isLoading: true });
-        try {
-          const result = await removeLineFromShopifyCart(cartId, item.lineId);
-          if (result.success) {
-            const currentItems = get().items;
-            const newItems = currentItems.filter((i) => i.variantId !== variantId);
-            if (newItems.length === 0) clearCart();
-            else set({ items: newItems });
-          } else if (result.cartNotFound) {
-            clearCart();
-          }
-        } catch (error) {
-          console.error("Failed to remove item:", error);
-        } finally {
-          set({ isLoading: false });
-        }
-      },
+      removeItem: (variantId) =>
+        set((state) => ({ items: state.items.filter((i) => i.variantId !== variantId) })),
 
-      clearCart: () => set({ items: [], cartId: null, checkoutUrl: null }),
-      getCheckoutUrl: () => get().checkoutUrl,
+      clearCart: () => set({ items: [] }),
 
       syncCart: async () => {
-        const { cartId, isSyncing, clearCart } = get();
-        if (!cartId || isSyncing) return;
-        set({ isSyncing: true });
-        try {
-          const data = await storefrontApiRequest(CART_QUERY, { id: cartId });
-          if (!data) return;
-          const cart = data?.data?.cart;
-          if (!cart || cart.totalQuantity === 0) clearCart();
-        } catch (error) {
-          console.error("Failed to sync cart with Shopify:", error);
-        } finally {
-          set({ isSyncing: false });
-        }
+        // Persist middleware keeps localStorage in sync automatically.
+        // This remains a no-op so existing callers (useCartSync, CartDrawer) work.
+        void get();
       },
+
+      getCheckoutUrl: () => (get().items.length > 0 ? CHECKOUT_URL : null),
     }),
     {
-      name: "shopify-cart",
+      name: "bakong-cart-store",
+      version: 2,
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        items: state.items,
-        cartId: state.cartId,
-        checkoutUrl: state.checkoutUrl,
-      }),
+      partialize: (state) => ({ items: state.items }),
+      // v1 stored only cartId/checkoutUrl and kept items in "local-cart".
+      migrate: (persisted) => {
+        const items =
+          persisted && Array.isArray((persisted as { items?: CartItem[] }).items)
+            ? ((persisted as { items: CartItem[] }).items ?? [])
+            : [];
+        return { items: items.length > 0 ? items : readLegacyCart() };
+      },
     },
   ),
 );

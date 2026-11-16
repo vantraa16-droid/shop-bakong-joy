@@ -4,15 +4,33 @@
 //     componentTagger (dev-only), VITE_* env injection, @ path alias, React/TanStack dedupe,
 //     error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
-import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { defineConfig } from "@lovable.dev/vite-tanstack-config/dist/index.js";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  nitro: {
+    preset: "vercel",
+    output: {
+      dir: ".vercel/output",
+      serverDir: ".vercel/output/functions/__server.func",
+      publicDir: ".vercel/output/static",
+    },
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
   },
   vite: {
+    build: {
+      chunkSizeWarningLimit: 1000,
+    },
+    server: {
+      allowedHosts: [".ngrok-free.app", ".ngrok-free.dev", ".ngrok.io"],
+    },
     optimizeDeps: {
       include: [
         "@supabase/supabase-js",
@@ -33,6 +51,16 @@ export default defineConfig({
         "zustand",
         "zustand/middleware",
       ],
+      esbuildOptions: {
+        alias: {
+          "node:async_hooks": path.resolve(__dirname, "src/polyfills/async_hooks.ts"),
+        },
+      },
+    },
+    resolve: {
+      alias: {
+        "node:async_hooks": path.resolve(__dirname, "src/polyfills/async_hooks.ts"),
+      },
     },
   },
 });

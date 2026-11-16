@@ -4,14 +4,20 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
 import { Navbar } from "@/components/site/Navbar";
 import { Footer } from "@/components/site/Footer";
+import { FloatingVideoWidget } from "@/components/site/FloatingVideoWidget";
+import { MobileTabBar } from "@/components/site/MobileTabBar";
+import { InstallPrompt } from "@/components/site/InstallPrompt";
 import { useCartSync } from "@/hooks/useCartSync";
 
 function NotFoundComponent() {
@@ -75,12 +81,26 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
+      { name: "theme-color", content: "#090809" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black" },
+      { name: "apple-mobile-web-app-title", content: "BillieGrace" },
+      { name: "format-detection", content: "telephone=no" },
+      { title: "BillieGrace Closet" },
+      {
+        name: "description",
+        content:
+          "Activewear and everyday essentials designed for women. New arrivals dropping weekly, delivered across Cambodia.",
+      },
+      { name: "author", content: "BillieGrace Closet" },
+      { property: "og:title", content: "BillieGrace Closet — Made for Her" },
+      {
+        property: "og:description",
+        content:
+          "Activewear and everyday essentials designed for women. New arrivals dropping weekly.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
@@ -89,6 +109,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         rel: "stylesheet",
         href: appCss,
+      },
+      {
+        rel: "icon",
+        type: "image/svg+xml",
+        href: "/Billie.svg",
+      },
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      {
+        rel: "apple-touch-icon",
+        href: "/icons/apple-touch-icon.png",
       },
     ],
   }),
@@ -116,17 +146,37 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   useCartSync();
 
+  // The back office has its own header and navigation, so the storefront
+  // chrome is hidden there — it only gets in the way while serving customers.
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const isBackOffice = pathname.startsWith("/admin");
+
+  // Offline support + installability. Production only, so dev hot-reload is never cached.
+  useEffect(() => {
+    if (import.meta.env.PROD && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="flex min-h-screen flex-col bg-background">
-        <Navbar />
+      <div
+        className={`flex min-h-screen flex-col bg-background ${
+          isBackOffice ? "" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
+        }`}
+      >
+        {isBackOffice ? null : <Navbar />}
         <main className="flex-1">
           {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
           <Outlet />
         </main>
-        <Footer />
+        {isBackOffice ? null : <Footer />}
+        {isBackOffice ? null : <FloatingVideoWidget />}
+        {isBackOffice ? null : <MobileTabBar />}
+        {isBackOffice ? null : <InstallPrompt />}
       </div>
       <Toaster position="top-center" richColors />
+      <SpeedInsights />
     </QueryClientProvider>
   );
 }

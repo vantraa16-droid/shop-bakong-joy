@@ -1,83 +1,190 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ProductCard } from "@/components/site/ProductCard";
-import {
-  storefrontApiRequest,
-  STOREFRONT_PRODUCTS_QUERY,
-  type ShopifyProduct,
-} from "@/lib/shopify";
+import { HomeHeroRail } from "@/components/site/HomeHeroRail";
+import { getProducts, getCollections } from "@/lib/productStore";
+import { getSiteContent, DEFAULT_SITE_CONTENT } from "@/lib/siteContent";
+import { motion } from "framer-motion";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Storefront — Less, but better." },
+      { title: "BillieGrace Closet — Modern Essentials for Women" },
       {
         name: "description",
-        content: "A curated storefront of considered everyday goods. Secure checkout powered by Shopify.",
+        content:
+          "Shop BillieGrace Closet: leggings, sports bras, sets and everyday essentials designed for women. New drops weekly, delivered across Cambodia.",
       },
-      { property: "og:title", content: "Storefront" },
-      { property: "og:description", content: "Minimal modern shopping." },
+      { property: "og:title", content: "BillieGrace Closet — Modern Essentials for Women" },
+      {
+        property: "og:description",
+        content:
+          "Activewear and everyday essentials designed for women. New arrivals dropping weekly.",
+      },
+      { property: "og:type", content: "website" },
     ],
   }),
   component: Index,
 });
 
+const fadeUp = {
+  initial: { opacity: 0, y: 16 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.6, ease: [0.23, 1, 0.32, 1] as [number, number, number, number] },
+};
+
 function Index() {
-  const { data, isLoading } = useQuery({
+  const { data: featuredProducts, isLoading } = useQuery({
     queryKey: ["products", "featured"],
-    queryFn: async () => {
-      const res = await storefrontApiRequest(STOREFRONT_PRODUCTS_QUERY, { first: 8, query: null });
-      return (res?.data?.products?.edges ?? []) as ShopifyProduct[];
-    },
+    queryFn: () => getProducts({ first: 12, onlyPublished: true }),
   });
 
+  const { data: collections } = useQuery({
+    queryKey: ["collections"],
+    queryFn: () => getCollections({ first: 6 }),
+  });
+
+  const { data: siteContent } = useQuery({
+    queryKey: ["site-content"],
+    queryFn: () => getSiteContent(),
+  });
+
+  // Fall back to the built-in defaults while loading (or if the section is
+  // somehow missing) so the homepage never renders empty/broken.
+  const content = siteContent ?? DEFAULT_SITE_CONTENT;
+  const { marquee, cta } = content;
+
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6">
-      <section className="py-16 sm:py-24">
-        <div className="mx-auto max-w-3xl text-center">
-          <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-foreground text-xl font-bold text-background">
-            S
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4 }}
+      className="min-h-screen"
+    >
+      {/* ── Hero — clothing rail ── */}
+      <HomeHeroRail content={content.rail_hero} />
+
+      {/* ── Marquee — quiet single-line scroll ── */}
+      <section className="border-b border-neutral-200 overflow-hidden py-3 bg-white">
+        <div className="marquee-track">
+          {[...marquee.words, ...marquee.words].map((word, i) => (
+            <span
+              key={i}
+              className="flex items-center gap-8 px-8 text-[10px] uppercase tracking-[0.3em] text-neutral-500 shrink-0"
+            >
+              {word}
+              <span aria-hidden className="text-neutral-300">
+                —
+              </span>
+            </span>
+          ))}
+        </div>
+      </section>
+
+      {/* ── New In — editorial grid ── */}
+      <section className="py-20 sm:py-24">
+        <div className="max-w-[1400px] mx-auto px-6 lg:px-10">
+          <motion.div {...fadeUp} className="flex items-end justify-between mb-10">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 mb-3">New In</p>
+              <h2 className="font-serif font-light text-3xl sm:text-4xl">Latest Pieces</h2>
+            </div>
+            <Link
+              to="/shop"
+              className="hidden sm:inline-flex items-center gap-2 text-[11px]
+                uppercase tracking-[0.25em] border-b border-neutral-900 pb-1
+                hover:opacity-60 transition-opacity"
+            >
+              View All
+              <ArrowRight className="w-3 h-3" strokeWidth={1.5} />
+            </Link>
+          </motion.div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-12">
+            {isLoading
+              ? Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="space-y-4">
+                    <Skeleton className="aspect-[4/5] w-full" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/4" />
+                  </div>
+                ))
+              : featuredProducts?.map((product) => (
+                  <ProductCard key={product.node.id} product={product} />
+                ))}
           </div>
-          <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-6xl">
-            Less, but better.
-          </h1>
-          <p className="mx-auto mt-5 max-w-xl text-balance text-muted-foreground sm:text-lg">
-            A curated storefront of considered everyday goods. Secure checkout powered by Shopify.
-          </p>
-          <div className="mt-8 flex justify-center gap-3">
-            <Button asChild size="lg" className="rounded-full">
-              <Link to="/shop">
-                Shop now <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
-            </Button>
+
+          <div className="mt-16 text-center">
+            <Link
+              to="/shop"
+              className="inline-flex items-center gap-3 bg-neutral-900 text-white
+                text-[11px] uppercase tracking-[0.25em] px-10 py-4
+                hover:bg-neutral-700 transition-colors"
+            >
+              View All Products
+              <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.5} />
+            </Link>
           </div>
         </div>
       </section>
 
-      <section className="py-10">
-        <div className="flex items-end justify-between">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Featured products</h2>
-          <Link to="/shop" className="text-sm text-muted-foreground hover:text-foreground">
-            View all →
-          </Link>
-        </div>
-        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {isLoading ? (
-            Array.from({ length: 8 }).map((_, i) => (
-              <Skeleton key={i} className="aspect-[3/4] rounded-2xl" />
-            ))
-          ) : !data || data.length === 0 ? (
-            <div className="col-span-full rounded-2xl border bg-card p-16 text-center text-muted-foreground">
-              No products found. Tell me what to add — e.g. "create a product called Linen Tee for $39".
+      {/* ── Categories — square editorial tiles ── */}
+      {collections && collections.length > 0 && (
+        <section className="py-16 border-t border-neutral-200">
+          <div className="max-w-[1400px] mx-auto px-6 lg:px-10">
+            <motion.div {...fadeUp} className="mb-10">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 mb-3">
+                Collections
+              </p>
+              <h2 className="font-serif font-light text-3xl sm:text-4xl">Shop by Category</h2>
+            </motion.div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+              {collections.slice(0, 6).map((collection) => (
+                <motion.div key={collection.node.id} {...fadeUp}>
+                  <Link
+                    to="/shop"
+                    search={{ q: collection.node.title }}
+                    className="group relative block aspect-[3/4] overflow-hidden bg-neutral-100"
+                  >
+                    <div className="absolute inset-0 bg-black/20 transition-colors duration-500 group-hover:bg-black/35" />
+                    <div className="absolute inset-x-0 bottom-0 p-5">
+                      <p className="text-white text-[11px] uppercase tracking-[0.2em]">
+                        {collection.node.title}
+                      </p>
+                    </div>
+                  </Link>
+                </motion.div>
+              ))}
             </div>
-          ) : (
-            data.map((product) => <ProductCard key={product.node.id} product={product} />)
-          )}
+          </div>
+        </section>
+      )}
+
+      {/* ── Closing statement — quiet full-width ── */}
+      <section className="py-24 sm:py-28 border-t border-neutral-200">
+        <div className="max-w-[1400px] mx-auto px-6 lg:px-10 text-center">
+          <motion.div {...fadeUp} className="max-w-2xl mx-auto">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 mb-6">The Edit</p>
+            <h2 className="font-serif font-light text-4xl sm:text-5xl leading-tight">
+              {cta.heading}
+            </h2>
+            <p className="mt-5 text-neutral-500 text-[15px] font-light leading-relaxed">
+              {cta.subtext}
+            </p>
+            <Link
+              to={cta.buttonLink as "/shop"}
+              className="mt-10 inline-block bg-neutral-900 text-white
+                text-[11px] uppercase tracking-[0.25em] px-10 py-4
+                hover:bg-neutral-700 transition-colors"
+            >
+              {cta.buttonLabel}
+            </Link>
+          </motion.div>
         </div>
       </section>
-    </div>
+    </motion.div>
   );
 }

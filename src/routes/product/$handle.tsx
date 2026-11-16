@@ -1,19 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, Loader2, ArrowLeft, ShoppingBag, Check } from "lucide-react";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { useCartStore } from "@/stores/cartStore";
-import {
-  storefrontApiRequest,
-  STOREFRONT_PRODUCT_BY_HANDLE_QUERY,
-  type ShopifyProduct,
-} from "@/lib/shopify";
+import { getProductByHandle } from "@/lib/productStore";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/product/$handle")({
-  head: ({ params }) => ({ meta: [{ title: `${params.handle} — Storefront` }] }),
+  head: ({ params }) => ({ meta: [{ title: `${params.handle} — BillieGrace Closet` }] }),
   component: ProductDetail,
 });
 
@@ -22,20 +21,34 @@ function ProductDetail() {
   const addItem = useCartStore((s) => s.addItem);
   const isLoading = useCartStore((s) => s.isLoading);
   const [variantIdx, setVariantIdx] = useState(0);
+  const [added, setAdded] = useState(false);
 
   const { data, isLoading: qLoading } = useQuery({
     queryKey: ["product", handle],
-    queryFn: async () => {
-      const res = await storefrontApiRequest(STOREFRONT_PRODUCT_BY_HANDLE_QUERY, { handle });
-      return res?.data?.product as ShopifyProduct["node"] | null;
-    },
+    queryFn: () => getProductByHandle(handle),
   });
 
-  const variant = useMemo(() => data?.variants.edges[variantIdx]?.node, [data, variantIdx]);
-  const product = useMemo<ShopifyProduct | null>(
-    () => (data ? ({ node: data } as ShopifyProduct) : null),
-    [data],
-  );
+  const variant = useMemo(() => data?.variants[variantIdx], [data, variantIdx]);
+  const product = useMemo(() => (data ? { node: data } : null), [data]);
+
+  // ---- Photo gallery (auto-scrolls when there is more than one photo) ----
+  const [imageIdx, setImageIdx] = useState(0);
+  const [galleryPaused, setGalleryPaused] = useState(false);
+  const images = data?.images ?? [];
+
+  // New product loaded → start from the first photo.
+  useEffect(() => {
+    setImageIdx(0);
+  }, [data?.id]);
+
+  // Auto-advance every 3.5s; pauses while the pointer is over the photo.
+  useEffect(() => {
+    if (images.length <= 1 || galleryPaused) return;
+    const timer = setInterval(() => {
+      setImageIdx((i) => (i + 1) % images.length);
+    }, 3500);
+    return () => clearInterval(timer);
+  }, [images.length, galleryPaused]);
 
   const handleAdd = async () => {
     if (!product || !variant) return;
@@ -48,16 +61,21 @@ function ProductDetail() {
       selectedOptions: variant.selectedOptions ?? [],
     });
     toast.success(`Added ${product.node.title} to cart`);
+    setAdded(true);
+    setTimeout(() => setAdded(false), 2000);
   };
 
   if (qLoading) {
     return (
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-2">
-        <Skeleton className="aspect-square rounded-2xl" />
-        <div className="space-y-4">
-          <Skeleton className="h-8 w-2/3" />
-          <Skeleton className="h-6 w-1/3" />
-          <Skeleton className="h-32 w-full" />
+      <div className="mx-auto grid grid-cols-1 max-w-6xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-2">
+        <Skeleton className="aspect-square rounded-3xl" />
+        <div className="space-y-5">
+          <Skeleton className="h-10 w-3/4" />
+          <Skeleton className="h-7 w-1/3" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-14 w-full rounded-full" />
         </div>
       </div>
     );
@@ -65,78 +83,182 @@ function ProductDetail() {
 
   if (!data) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-20 text-center">
+      <div className="mx-auto max-w-2xl px-4 py-24 text-center">
         <h1 className="text-2xl font-semibold">Product not found</h1>
-        <Button asChild className="mt-6 rounded-full">
+        <p className="mt-2 text-muted-foreground">This product may have been removed.</p>
+        <Button asChild className="mt-8 rounded-full px-8">
           <Link to="/shop">Back to shop</Link>
         </Button>
       </div>
     );
   }
 
-  const image = data.images.edges[0]?.node;
-  const price = variant?.price ?? data.priceRange.minVariantPrice;
+  const price = variant?.price ?? data?.price;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4 }}
+      className="mx-auto max-w-6xl px-4 py-10 sm:px-6"
+    >
       <Link
         to="/shop"
-        className="mb-6 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors group"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to shop
+        <ArrowLeft className="h-4 w-4 group-hover:-translate-x-0.5 transition-transform" />
+        Back to shop
       </Link>
-      <div className="grid gap-8 md:grid-cols-2">
-        <div className="aspect-square overflow-hidden rounded-2xl bg-muted">
-          {image && (
-            <img
-              src={image.url}
-              alt={image.altText ?? data.title}
+
+      <div className="grid grid-cols-1 gap-10 md:grid-cols-2 lg:gap-16">
+        {/* Photos — auto-scrolling gallery */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5 }}
+          className="relative aspect-square overflow-hidden rounded-3xl liquid-glass"
+          onMouseEnter={() => setGalleryPaused(true)}
+          onMouseLeave={() => setGalleryPaused(false)}
+        >
+          {images.length > 0 ? (
+            <motion.img
+              key={`${imageIdx}-${images[imageIdx]?.url}`}
+              src={images[imageIdx]?.url}
+              alt={images[imageIdx]?.altText ?? data.title}
               className="h-full w-full object-cover"
+              initial={{ opacity: 0, scale: 1.04 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.6 }}
             />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-muted">
+              <ShoppingBag className="h-16 w-16 text-muted-foreground/30" />
+            </div>
           )}
-        </div>
-        <div className="space-y-6">
+
+          {images.length > 1 && (
+            <>
+              <button
+                type="button"
+                aria-label="Previous photo"
+                onClick={() => setImageIdx((i) => (i - 1 + images.length) % images.length)}
+                className="absolute top-1/2 left-3 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full liquid-glass-card text-foreground shadow transition-opacity"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Next photo"
+                onClick={() => setImageIdx((i) => (i + 1) % images.length)}
+                className="absolute top-1/2 right-3 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full liquid-glass-card text-foreground shadow transition-opacity"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+              <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-1.5">
+                {images.map((img, i) => (
+                  <button
+                    key={`${i}-${img.url}`}
+                    type="button"
+                    aria-label={`Go to photo ${i + 1}`}
+                    onClick={() => setImageIdx(i)}
+                    className={`h-1.5 cursor-pointer rounded-full transition-all ${
+                      i === imageIdx ? "w-5 bg-foreground" : "w-1.5 bg-foreground/40"
+                    }`}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {data.collections.length > 0 && (
+            <div className="absolute top-4 left-4">
+              <Badge className="liquid-glass-card text-foreground border-0 shadow-none">
+                {data.collections[0]}
+              </Badge>
+            </div>
+          )}
+        </motion.div>
+
+        {/* Info */}
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5, delay: 0.1, ease: [0.23, 1, 0.32, 1] }}
+          className="flex flex-col gap-6"
+        >
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{data.title}</h1>
-            <p className="mt-2 text-2xl font-semibold">
-              {price.currencyCode} {parseFloat(price.amount).toFixed(2)}
+            {data.productType && (
+              <p className="text-sm font-medium text-accent uppercase tracking-widest mb-2">
+                {data.productType}
+              </p>
+            )}
+            <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight leading-tight">
+              {data.title}
+            </h1>
+            <p className="mt-3 text-3xl font-bold">
+              {price.currencyCode} <span>{parseFloat(price.amount).toFixed(2)}</span>
             </p>
           </div>
+
+          <Separator />
+
           {data.description && (
-            <p className="whitespace-pre-line text-muted-foreground">{data.description}</p>
+            <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
+              {data.description}
+            </p>
           )}
-          {data.variants.edges.length > 1 && (
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Variant</p>
+
+          {data.variants.length > 1 && (
+            <div className="space-y-3">
+              <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Variant
+              </p>
               <div className="flex flex-wrap gap-2">
-                {data.variants.edges.map((v, i) => (
-                  <Button
-                    key={v.node.id}
-                    variant={i === variantIdx ? "default" : "outline"}
-                    size="sm"
-                    className="rounded-full"
+                {data.variants.map((v, i) => (
+                  <button
+                    key={v.id}
                     onClick={() => setVariantIdx(i)}
-                    disabled={!v.node.availableForSale}
+                    disabled={!v.availableForSale}
+                    className={`rounded-full px-4 py-2 text-sm font-medium transition-all border cursor-pointer ${
+                      i === variantIdx
+                        ? "bg-foreground text-background border-foreground"
+                        : "bg-transparent text-foreground border-border hover:border-foreground"
+                    } disabled:opacity-40 disabled:cursor-not-allowed`}
                   >
-                    {v.node.title}
-                  </Button>
+                    {v.title}
+                  </button>
                 ))}
               </div>
             </div>
           )}
-          <Button
-            size="lg"
-            className="w-full rounded-full"
-            onClick={handleAdd}
-            disabled={!variant?.availableForSale || isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : null}
-            {variant?.availableForSale ? "Add to cart" : "Sold out"}
-          </Button>
-        </div>
+
+          <div className="space-y-3 mt-auto pt-2">
+            <Button
+              size="lg"
+              className="w-full rounded-full py-6 text-base font-semibold transition-all"
+              onClick={handleAdd}
+              disabled={!variant?.availableForSale || isLoading}
+            >
+              {isLoading ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : added ? (
+                <Check className="mr-2 h-5 w-5" />
+              ) : (
+                <ShoppingBag className="mr-2 h-5 w-5" />
+              )}
+              {!variant?.availableForSale ? "Sold out" : added ? "Added!" : "Add to cart"}
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              className="w-full rounded-full py-6 text-base"
+              asChild
+            >
+              <Link to="/shop">Continue shopping</Link>
+            </Button>
+          </div>
+        </motion.div>
       </div>
-    </div>
+    </motion.div>
   );
 }
